@@ -86,7 +86,7 @@ const InternalForm = ({
   //   Change to string
   const [currentMember, setCurrentMember] = useState<string | null>(null);
   const [showPopUp, setShowPopUp] = useState(false);
-  const [selectedRows, setSelectedRows] = useState({});
+  const [selectedRowsCount, setSelectedRowsCount] = useState(0);
   const [comment, setComment] = useState('');
   const { t } = useTranslation();
   const navigate = useNavigate();
@@ -280,9 +280,10 @@ const InternalForm = ({
   };
 
   //   Changes done
-  const handleAddReasonClick = (fullName) => {
+  const handleAddReasonClick = (memberReferenceId) => {
     backUpFormState.current = getValues();
-    setCurrentMember(fullName);
+    // change memberReferenceId on panel click !important
+    setCurrentMember(memberReferenceId);
     setShowPopUp(true);
   };
 
@@ -305,24 +306,24 @@ const InternalForm = ({
   //     });
   //   };
 
-  //   seems no change required here
-  const handleRowSelectionChange = (fullName, reason: string) => {
-    setValue(`check-${reason}`, !watch(`check-${reason}`));
-    setSelectedRows((prev) => {
-      const memberRows = prev[fullName] || [];
-      if (memberRows.includes(reason)) {
-        return {
-          ...prev,
-          [fullName]: memberRows.filter((r) => r !== reason),
-        };
-      } else {
-        return {
-          ...prev,
-          [fullName]: [...memberRows, reason],
-        };
-      }
-    });
-  };
+  // //   seems no change required here
+  // const handleRowSelectionChange = (fullName, reason: string) => {
+  //   setValue(`check-${reason}`, !watch(`check-${reason}`));
+  //   setSelectedRows((prev) => {
+  //     const memberRows = prev[fullName] || [];
+  //     if (memberRows.includes(reason)) {
+  //       return {
+  //         ...prev,
+  //         [fullName]: memberRows.filter((r) => r !== reason),
+  //       };
+  //     } else {
+  //       return {
+  //         ...prev,
+  //         [fullName]: [...memberRows, reason],
+  //       };
+  //     }
+  //   });
+  // };
 
   const handleAddReasonToTable = ({ reset, dismiss }) => {
     setShowPopUp(false);
@@ -331,37 +332,41 @@ const InternalForm = ({
   };
 
   //  Inprogress
-  const handleRemoveSelectedReasons = async (fullName: string) => {
-    const updatedClosures = memberClosures[member?.fullName].adminClosures
-      .filter((closure) => closure.status === 'APPLIED' || closure.status === 'DRAFT')
-      .map((closure) => {
-        if (selectedRows[member?.fullName].includes(closure.reason)) {
-          return { ...closure, isRemoved: true };
-        }
-        return closure;
-      });
-    setMemberClosures((prevClosures) => ({
-      ...prevClosure,
-      [member?.fullName]: {
-        ...prevClosures[member?.fullName],
-        adminClosures: updatedClosures,
-      },
-    }));
-    const checkRemove = selectedRows.some((reason) =>
-      memberClosure[member?.fullName].adminClosure.some(
-        (closure) => closure.reason === reason && closure.status === 'APPLIED',
-      ),
-    );
-    if (!checkRemove) {
+  const handleRemoveSelectedReasons = async (memberReferenceId: string) => {
+    // const updatedClosures = memberClosures[member?.fullName].adminClosures
+    //   .filter((closure) => closure.status === 'APPLIED' || closure.status === 'DRAFT')
+    //   .map((closure) => {
+    //     if (selectedRows[member?.fullName].includes(closure.reason)) {
+    //       return { ...closure, isRemoved: true };
+    //     }
+    //     return closure;
+    //   });
+    // setMemberClosures((prevClosures) => ({
+    //   ...prevClosure,
+    //   [member?.fullName]: {
+    //     ...prevClosures[member?.fullName],
+    //     adminClosures: updatedClosures,
+    //   },
+    // }));
+    // const checkRemove = selectedRows.some((reason) =>
+    //   memberClosure[member?.fullName].adminClosure.some(
+    //     (closure) => closure.reason === reason && closure.status === 'APPLIED',
+    //   ),
+    // );
+    // Fetch checkbox selected reasons from form state
+    const reasons = Object.values(getValues(`tableCheckBox.${memberReferenceId}`))
+      .filter((value) => value?.isChecked === true)
+      .map(({ reason }) => reason);
+
+    if (reasons.length > 0) {
       showDefaultloading();
       try {
-        const memberReferenceId = member?.memberReferenceId;
         const response = await request(
           AgentApiConstants.ADMINISTRATIVE_CLOSING.removeAdminClosure({
-            memberReferenceId,
+            memberReferenceId: currentMember,
           }),
           {
-            body: selectedRows,
+            body: reasons,
           },
         );
         if (response && !response.subErrors) {
@@ -408,23 +413,33 @@ const InternalForm = ({
     setCurrentMember(null);
     setShowPopUp(false);
     hideLoading();
+    // Reset checkbox here and also on panel click !important
+    setSelectedRowsCount(0);
+    reset({ ...getValues(), tableCheckBox: {} });
   };
 
   //   Prefix memberData in name
   const headings = useMemo(
     () => [
-      ({ row: { reason = '', status = '', fullName } = {} }: any) => {
+      ({
+        row: { reason = '', status = '', fullName, reasonId, memberReferenceId } = {},
+      }: any) => {
         return (
           <div>
             <Checkbox
               cmpFirst
               displayLabel={false}
-              name={`tableCheckBox.${fullName}.${reason}`}
+              name={`tableCheckBox.${memberReferenceId}.${reasonId}.isChecked`}
               label={`${reason}`}
               className="form-checkbox"
-              checked={watch(`check-${reason}`)}
               onChange={({ target: { checked } }: any) => {
-                handleRowSelectionChange(fullName, reason);
+                const key = `tableCheckBox.${memberReferenceId}.${reasonId}.reason`;
+                setValue(key, reason);
+                if (checked) {
+                  setSelectedRowsCount((prevState) => prevState + 1);
+                } else {
+                  setSelectedRowsCount((prevState) => prevState - 1);
+                }
               }}
             />
             <span>
@@ -516,7 +531,7 @@ const InternalForm = ({
         );
       },
     ],
-    [selectedRows, currentMember],
+    [selectedRowsCount, currentMember],
   );
 
   const onSubmitHandle = (buttonRef) => {
@@ -550,7 +565,7 @@ const InternalForm = ({
   //  Mani --> Changes Done here, remove useMemo dep array
   const panels = () =>
     Object.values(getValues('memberData')).map(
-      ({ fullName, dob, adminClosures }: any, index: number) => (
+      ({ fullName, dob, adminClosures, memberReferenceId }: any, index: number) => (
         <Panel
           className=""
           title={`${fullName} (HOH; DOB: ${formatDate(dob)})`}
@@ -577,15 +592,15 @@ const InternalForm = ({
           <Button
             type="button"
             className="btn add-btn hix-m-t-20"
-            onClick={() => handleAddReasonClick(fullName)}
+            onClick={() => handleAddReasonClick(memberReferenceId)}
           >
             {t('adminClosure.addReason')}
           </Button>
           <Button
             type="button"
             className="btn add-btn hix-m-t-20"
-            onClick={() => handleRemoveSelectedReasons(fullName)}
-            disabled={!(selectedRows[fullName]?.length > 0)}
+            onClick={() => handleRemoveSelectedReasons(memberReferenceId)}
+            disabled={selectedRowsCount === 0}
           >
             {t('adminClosure.removeReason')}
           </Button>
